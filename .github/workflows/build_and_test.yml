@@ -1,0 +1,110 @@
+name: Build, Test, Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - '*'
+    branches:
+      - 'main'
+      - 'gh-actions*'
+  pull_request:
+    branches:
+      - '*'
+
+env:
+  TIMEZONE: 'America/Chicago'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+  DOTNET_NOLOGO: true
+  ArtifactDirectory: ${{ github.workspace}}/artifacts
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  build_and_test:
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      pull-requests: write
+    steps:
+    - uses: actions/checkout@v2
+  
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: 8
+        dotnet-quality: ga
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build
+      run: dotnet build --no-restore --configuration:Release
+
+    # - name: Test Core
+    #   if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
+    #   run: |
+    #       dotnet test 'tests\' `
+    #       --no-build `
+    #       --configuration:Release `
+    #       --logger:trx `
+    #       --results-directory ${{ env.ArtifactDirectory }}
+
+    # - name: Upload Test Results
+    #   if: ${{ always() && github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
+    #   uses: actions/upload-artifact@v4
+    #   with:
+    #     name: test-results
+    #     path: ${{ env.ArtifactDirectory }}/**/*.trx
+
+  # test_results_comment:
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     checks: write
+  #     pull-requests: write
+  #   needs:
+  #     - build_and_test
+    
+  #   steps:
+  #   - name: Download Test Results
+  #     uses: actions/download-artifact@v4
+  #     with:
+  #       path: ${{ env.ArtifactDirectory }}
+
+  #   - name: Test Results Comment
+  #     if: always()
+  #     uses: im-open/process-dotnet-test-results@v2.4
+  #     with:
+  #       github-token: ${{ secrets.GITHUB_TOKEN }}
+  #       timezone: ${{ env.TIMEZONE }}
+  #       create-status-check: false
+  #       create-pr-comment: true
+  #       comment-identifier: 'TestResults'
+
+  tag:
+    if: ${{ github.event_name != 'pull_request' }}
+    uses: ./.github/workflows/tag.yml
+
+  test-tag-output:
+    runs-on: ubuntu-latest
+    needs:
+      - tag
+    steps:
+    - name: Echo tag output
+      run: |
+        echo version: "${{ needs.tag.outputs.version }}"
+        echo prerelease-depth: "${{ fromJSON(needs.tag.outputs.prerelease-depth) }}"
+        echo is-prerelease: "${{ fromJSON(needs.tag.outputs.is-prerelease) }}"
+
+  release:
+    needs:
+      - tag
+      - build_and_test
+    if: ${{ github.ref_type == 'tag' || github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && fromJSON(needs.tag.outputs.prerelease-depth) < 2 }}
+    uses: ./.github/workflows/release.yml
+    with:
+      version: ${{ needs.tag.outputs.version }}
+      is-prerelease: ${{ fromJSON(needs.tag.outputs.is-prerelease) }}
+    secrets: inherit

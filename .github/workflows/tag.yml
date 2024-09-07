@@ -1,0 +1,102 @@
+name: Tag
+
+on:
+  workflow_call:
+    outputs:
+      version:
+        description: "Generated version"
+        value: ${{ jobs.tag.outputs.version }}
+      major:
+        description: "Generated major version"
+        value: ${{ jobs.tag.outputs.major }}
+      minor:
+        description: "Generated minor version"
+        value: ${{ jobs.tag.outputs.minor }}
+      patch:
+        description: "Generated patch version"
+        value: ${{ jobs.tag.outputs.patch }}
+      prerelease:
+        description: "Generated prerelease version"
+        value: ${{ jobs.tag.outputs.prerelease }}
+      prerelease-depth:
+        description: "Number of periods in the prerelease version"
+        value: ${{ jobs.tag.outputs.prerelease-depth }}
+      is-prerelease:
+        description: "Boolean string indicating whether the version is a prerelease"
+        value: ${{ jobs.tag.outputs.is-prerelease }}
+
+env:
+  #MinVerIgnoreHeight: true 
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+  DOTNET_NOLOGO: true
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      major: ${{ steps.version.outputs.major }}
+      minor: ${{ steps.version.outputs.minor }}
+      patch: ${{ steps.version.outputs.patch }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+      prerelease-depth: ${{ steps.set-prerelease-depth.outputs.prerelease_depth }}
+      is-prerelease: ${{ steps.set-is-prerelease.outputs.is_prerelease }}
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 0
+
+    - name: action-minver-refreshed
+      id: version
+      uses: Stelzi79/action-minver@3.0.1
+      with:
+        minver-version: 4.3.0
+        auto-increment: patch
+        tag-prefix: v
+        default-pre-release-phase: preview
+
+    - name: Echo version #version major minor patch prerelease
+      run: |
+        echo version: ${{ steps.version.outputs.version }}
+        echo major: ${{ steps.version.outputs.major }}, minor: ${{ steps.version.outputs.minor }}, patch: ${{ steps.version.outputs.patch }}
+        echo prerelease: ${{ steps.version.outputs.prerelease }}
+    
+    - name: Set prerelease depth
+      id: set-prerelease-depth
+      run: |
+        echo "prerelease_depth=$(echo '${{ steps.version.outputs.prerelease }}' | tr -cd '.' | wc -c | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+    - name: Echo prerelease depth
+      run: echo "${{ steps.set-prerelease-depth.outputs.prerelease_depth }}"
+
+    - name: Set is-prerelease
+      id: set-is-prerelease
+      run: |
+        echo "is_prerelease=$(echo '${{ contains(steps.version.outputs.version, '-') && 'true' || 'false' }}')" >> "$GITHUB_OUTPUT"
+
+    - name: Echo is-prerelease
+      run: echo "${{ steps.set-is-prerelease.outputs.is_prerelease }}"
+    
+    - name: Tag version
+      if: ${{ github.ref == 'refs/heads/main' }}
+      run: |
+        git tag v${{ steps.version.outputs.version }}
+        git push --tags
+
+    # Update unstable tag on main branch
+    - name: Tag unstable
+      if: ${{ github.ref_type == 'tag' || github.ref == 'refs/heads/main' }}
+      uses: EndBug/latest-tag@v1.5.1
+      with:
+        ref: unstable
+
+    # Update latest tag on main branch when tagged RTM
+    - name: Tag latest
+      if: ${{ github.ref_type == 'tag' || github.ref == 'refs/heads/main' && steps.version.outputs.prerelease == '' }}
+      uses: EndBug/latest-tag@v1.5.1
+
+    # - name: Tag version
+    #   if: ${{ github.ref == 'refs/heads/main' }}
+    #   uses: EndBug/latest-tag@v1.5.1
+    #   with:
+    #     ref: v${{ steps.version.outputs.version }}

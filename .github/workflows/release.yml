@@ -1,0 +1,62 @@
+name: Pack & Release
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+      is-prerelease:
+        required: true
+        type: boolean
+env:
+  MinVerVersionOverride: ${{ inputs.version }}
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+  DOTNET_NOLOGO: true
+  ArtifactDirectory: ${{ github.workspace }}/artifacts
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - run: |
+          dotnet nuget add source `
+          --username USERNAME `
+          --password ${{ secrets.GITHUB_TOKEN }} `
+          --store-password-in-clear-text `
+          --name github "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+
+      - run: |
+          dotnet pack `
+          -c Release `
+          -o ${{ env.ArtifactDirectory }} `
+          /p:RepositoryUrl="${{ github.server_url }}/${{ github.repository }}" `
+          /p:Authors=${{ github.repository_owner }}
+
+      - name: Echo artifact directory
+        run: |
+          echo ${{ env.ArtifactDirectory }}
+          ls ${{ env.ArtifactDirectory }}
+
+      - name: Create GitHub release
+        id: release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: v${{ inputs.version }}
+          prerelease: ${{ inputs.is-prerelease }}
+          artifacts: "${{ env.ArtifactDirectory }}/*.nupkg"
+      
+      - name: Publish to pkg.github.com
+        run: |
+          dotnet nuget push "${{ env.ArtifactDirectory }}/*.nupkg" -s "github"
